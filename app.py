@@ -143,20 +143,34 @@ def update_student(student_id):
     """Update a student by ID"""
     print(f"PUT request received for student_id: {student_id}")
     print("Headers received:", dict(request.headers))
-    print("Body received:", request.get_data(as_text=True))
+    print("Body received:", request.get_data())
     
     try:
-        # Check if request has JSON data
-        if not request.is_json:
-            return jsonify({'error': 'Content-Type must be application/json'}), 400
-            
         data = request.get_json()
-        if not data:
-            return jsonify({'error': 'No JSON data provided'}), 400
-            
-        print(f"Parsed JSON data: {data}")
-        
-        # Check if student exists first
+        print("Parsed JSON data:", data)
+        # List of fields you allow to update
+        allowed_fields = [
+            'first_name', 'last_name', 'date_of_birth', 'grade_level',
+            'enrollment_date', 'phone', 'address', 'emergency_contact', 'emergency_phone', 'user_id'
+        ]
+        # Build the SET part of the SQL dynamically
+        set_clauses = []
+        values = []
+        for field in allowed_fields:
+            if field in data:
+                value = data[field]
+                # Convert empty strings to None (NULL in SQL)
+                if value == "":
+                    value = None
+                set_clauses.append(f"{field} = %s")
+                values.append(value)
+        if not set_clauses:
+            return jsonify({'error': 'No valid fields to update'}), 400
+        values.append(student_id)
+        set_clause = ', '.join(set_clauses)
+        sql = f"UPDATE students SET {set_clause} WHERE student_id = %s"
+        print("Executing SQL:", sql)
+        print("With values:", values)
         conn = psycopg2.connect(
             host=DB_HOST,
             port=DB_PORT,
@@ -165,61 +179,14 @@ def update_student(student_id):
             password=DB_PASS
         )
         cur = conn.cursor()
-        
-        # Verify student exists
-        cur.execute("SELECT student_id FROM students WHERE student_id = %s", (student_id,))
-        if not cur.fetchone():
-            cur.close()
-            conn.close()
-            return jsonify({'error': f'Student with ID {student_id} not found'}), 404
-        
-        # List of fields you allow to update
-        allowed_fields = [
-            'first_name', 'last_name', 'date_of_birth', 'grade_level',
-            'enrollment_date', 'phone', 'address', 'emergency_contact', 'emergency_phone'
-        ]
-        
-        # Build the SET part of the SQL dynamically
-        set_clauses = []
-        values = []
-        for field in allowed_fields:
-            if field in data:
-                set_clauses.append(f"{field} = %s")
-                values.append(data[field])
-        
-        if not set_clauses:
-            cur.close()
-            conn.close()
-            return jsonify({'error': 'No valid fields to update'}), 400
-        
-        values.append(student_id)
-        set_clause = ', '.join(set_clauses)
-        sql = f"UPDATE students SET {set_clause} WHERE student_id = %s"
-        
-        print(f"Executing SQL: {sql}")
-        print(f"With values: {values}")
-        
         cur.execute(sql, values)
-        rows_affected = cur.rowcount
         conn.commit()
         cur.close()
         conn.close()
-        
-        if rows_affected == 0:
-            return jsonify({'error': f'No student found with ID {student_id}'}), 404
-        
-        return jsonify({
-            'message': f'Student {student_id} updated successfully',
-            'rows_affected': rows_affected,
-            'updated_fields': list(data.keys())
-        }), 200
-        
-    except psycopg2.Error as db_error:
-        print(f"Database error: {db_error}")
-        return jsonify({'error': f'Database error: {str(db_error)}'}), 500
+        return jsonify({'message': f'Student {student_id} updated successfully'}), 200
     except Exception as e:
-        print(f"General error: {e}")
-        return jsonify({'error': f'Server error: {str(e)}'}), 500
+        print("Database error:", str(e))
+        return jsonify({'error': str(e)}), 500
 
 # Add a GET route for individual students to help with debugging
 @app.route('/students/<int:student_id>', methods=['GET'])
